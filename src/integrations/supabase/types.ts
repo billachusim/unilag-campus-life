@@ -14,13 +14,205 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      messages: {
+        Row: {
+          body: string
+          created_at: string
+          from_id: string
+          id: string
+          kind: string
+          read: boolean
+          to_id: string
+        }
+        Insert: {
+          body?: string
+          created_at?: string
+          from_id: string
+          id?: string
+          kind?: string
+          read?: boolean
+          to_id: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          from_id?: string
+          id?: string
+          kind?: string
+          read?: boolean
+          to_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_from_id_fkey"
+            columns: ["from_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_to_id_fkey"
+            columns: ["to_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      posts: {
+        Row: {
+          author_id: string
+          body: string
+          created_at: string
+          id: string
+          title: string
+        }
+        Insert: {
+          author_id: string
+          body?: string
+          created_at?: string
+          id?: string
+          title: string
+        }
+        Update: {
+          author_id?: string
+          body?: string
+          created_at?: string
+          id?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "posts_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          bio: string
+          created_at: string
+          dept: string
+          faculty: string
+          id: string
+          is_seed: boolean
+          last_seen: string
+          level: string
+          name: string
+          residence: string
+          room: string
+          user_id: string | null
+        }
+        Insert: {
+          bio?: string
+          created_at?: string
+          dept?: string
+          faculty?: string
+          id?: string
+          is_seed?: boolean
+          last_seen?: string
+          level?: string
+          name: string
+          residence?: string
+          room?: string
+          user_id?: string | null
+        }
+        Update: {
+          bio?: string
+          created_at?: string
+          dept?: string
+          faculty?: string
+          id?: string
+          is_seed?: boolean
+          last_seen?: string
+          level?: string
+          name?: string
+          residence?: string
+          room?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      trivia_scores: {
+        Row: {
+          created_at: string
+          host_id: string | null
+          id: string
+          player_id: string
+          score: number
+        }
+        Insert: {
+          created_at?: string
+          host_id?: string | null
+          id?: string
+          player_id: string
+          score: number
+        }
+        Update: {
+          created_at?: string
+          host_id?: string | null
+          id?: string
+          player_id?: string
+          score?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trivia_scores_host_id_fkey"
+            columns: ["host_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trivia_scores_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      votes: {
+        Row: {
+          candidate_id: string
+          created_at: string
+          id: string
+          office: string
+          voter_id: string
+        }
+        Insert: {
+          candidate_id: string
+          created_at?: string
+          id?: string
+          office: string
+          voter_id: string
+        }
+        Update: {
+          candidate_id?: string
+          created_at?: string
+          id?: string
+          office?: string
+          voter_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "votes_voter_id_fkey"
+            columns: ["voter_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      my_profile_id: { Args: never; Returns: string }
     }
     Enums: {
       [_ in never]: never
