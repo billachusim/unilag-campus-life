@@ -374,7 +374,7 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
 }
 
 function Onboarding({ onDone }: { onDone: (p: Profile) => void }) {
-  const [p, setP] = useState<Profile>({ name: "", email: "", matric: "", faculty: FACULTIES[0], dept: "", level: "100L", residence: HOSTELS[0], room: "" });
+  const [p, setP] = useState<Profile>({ name: "", email: "", matric: "", faculty: FACULTIES[0], dept: "", level: "100L", residence: `${HOSTELS[0]} Hall`, room: "" });
   const [step, setStep] = useState(0); const [code, setCode] = useState(""); const [sent, setSent] = useState("");
   const f = (k: keyof Profile) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setP({ ...p, [k]: e.target.value });
   const inp = "w-full rounded-md border border-input bg-background p-2.5 text-sm";
