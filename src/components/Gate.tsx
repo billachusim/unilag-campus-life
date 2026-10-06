@@ -389,6 +389,32 @@ export function Gate({ userId, onProfile }: { userId?: string; onProfile?: (p: P
     setStage("checkmail");
   }
 
+  async function demoPass() {
+    setBusy(true);
+    say(me("Oga, I have a Demo Pass!"), g("Ehen! Demo Pass? Oya pass, Babatunde. Turnstile open!"));
+    localStorage.setItem("unilag-remember", "1");
+    localStorage.setItem(
+      PENDING,
+      JSON.stringify({
+        name: `Babatunde ${Math.floor(100 + Math.random() * 900)}`,
+        faculty: "Science",
+        dept: "Computer Science",
+        level: "200L",
+        residence: "Jaja Hall",
+        room: "A204",
+        bio: "Demo student testing campus life.",
+      }),
+    );
+    setStage("turnstile");
+    const { error } = await supabase.auth.signInAnonymously();
+    setBusy(false);
+    if (error) {
+      localStorage.removeItem(PENDING);
+      say(g(`Demo Pass no work right now: ${error.message}`));
+      setStage("halt");
+    }
+  }
+
   const textStage = stage === "name" || stage === "dept" || stage === "room";
   const placeholder = {
     name: "Your full name",
@@ -408,6 +434,20 @@ export function Gate({ userId, onProfile }: { userId?: string; onProfile?: (p: P
             {stage === "outside" ? "📍 Outside Main Gate" : "📍 Main Gate checkpoint"}
           </span>
         </header>
+        {!userId && (
+          <button
+            disabled={busy}
+            onClick={demoPass}
+            className="mb-4 w-full rounded-lg border-2 border-primary bg-primary/15 px-4 py-3 text-left hover:bg-primary/25 disabled:opacity-50"
+          >
+            <div className="font-display text-lg font-bold text-primary">
+              ⚡ Quick Test / Demo Pass
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Skip sign-up — enter instantly as Babatunde, Computer Science 200L, Jaja Hall A204.
+            </div>
+          </button>
+        )}
         <div className="mb-4 grid grid-cols-[1fr_auto_1fr] items-end gap-2 rounded-lg border border-border bg-card p-4 text-center">
           <div className="text-4xl">
             💂🏾‍♂️<div className="font-mono text-[10px] text-muted-foreground">Sgt. Adewale</div>
