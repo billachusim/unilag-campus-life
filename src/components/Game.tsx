@@ -1,34 +1,50 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { lovable } from "@/integrations/lovable/index";
+import type { Tables } from "@/integrations/supabase/types";
 import {
   LOCATIONS, ROAD_LINKS, FACULTIES, LEVELS, HOSTELS, TRANSPORT, FOODS, CANDIDATES, CBT_QUESTIONS,
-  RANDOM_EVENTS, roomsFor, dist, type Loc, type Transport,
+  RANDOM_EVENTS, dist, type Loc, type Transport,
 } from "@/lib/game";
 
-interface Profile { name: string; email: string; matric: string; faculty: string; dept: string; level: string; residence: string; room: string }
+type Profile = Tables<"profiles">;
+type Msg = Tables<"messages">;
 interface Stats { energy: number; hunger: number; sanity: number; cgpa: number; money: number; attendance: number }
-interface Post { id: number; author: string; title: string; body: string }
 interface Save {
-  profile: Profile | null; stats: Stats; loc: string; day: number; hour: number;
-  log: string[]; votes: Record<string, string>; posts: Post[]; roomDecor: string[]; roommates: string[];
+  stats: Stats; loc: string; day: number; hour: number;
+  log: string[]; roomDecor: string[]; roommates: string[];
 }
 
 const DEFAULT: Save = {
-  profile: null,
   stats: { energy: 80, hunger: 70, sanity: 75, cgpa: 3.5, money: 15000, attendance: 0 },
-  loc: "gate", day: 1, hour: 8, log: ["Welcome to UNILAG. Find your feet!"], votes: {}, roommates: [], roomDecor: [],
-  posts: [
-    { id: 1, author: "Tobi Prints", title: "Cheap printing & binding", body: "₦20/page at the Business Strip. Projects bound in 1 hour." },
-    { id: 2, author: "Amaka Braids", title: "Knotless braids — student price", body: "Moremi Hall B214. DM for slots this weekend." },
-    { id: 3, author: "Jaja Hall Week", title: "Hall Week Concert Friday", body: "Live at Jaja. Bring your naira for spraying!" },
-  ],
+  loc: "gate", day: 1, hour: 8, log: ["Welcome to UNILAG. Find your feet!"], roommates: [], roomDecor: [],
 };
-const KEY = "unilaglife-save-v1";
+const KEY = "unilaglife-save-v2";
 const clamp = (n: number, a = 0, b = 100) => Math.max(a, Math.min(b, n));
 
 export function Game() {
+  const [session, setSession] = useState<{ user: { id: string; email?: string } } | null | undefined>(undefined);
+  const [me, setMe] = useState<Profile | null | undefined>(undefined);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data } = supabase.auth.onAuthStateChange((_e, sess) => setSession(sess));
+    return () => data.subscription.unsubscribe();
+  }, []);
+  useEffect(() => {
+    if (!session) { setMe(session === null ? null : undefined); return; }
+    supabase.from("profiles").select("*").eq("user_id", session.user.id).maybeSingle().then(({ data }) => setMe(data));
+  }, [session]);
+  if (session === undefined || (session && me === undefined)) return <div className="min-h-screen" />;
+  if (!session) return <AuthScreen />;
+  if (!me) return <Onboarding userId={session.user.id} email={session.user.email ?? ""} onDone={setMe} />;
+  return <GameInner me={me} />;
+}
+
+function GameInner({ me }: { me: Profile }) {
   const [s, setS] = useState<Save>(DEFAULT);
   const [loaded, setLoaded] = useState(false);
-  const [tab, setTab] = useState<"place" | "board" | "politics" | "room">("place");
+  const [tab, setTab] = useState<"place" | "board" | "politics" | "room" | "inbox">("place");
+  const inbox = useInbox(me.id);
   const [travelTo, setTravelTo] = useState<Loc | null>(null);
   const [event, setEvent] = useState<(typeof RANDOM_EVENTS)[number] | null>(null);
   const [cbt, setCbt] = useState(false);
@@ -69,7 +85,6 @@ export function Game() {
   }
 
   if (!loaded) return <div className="min-h-screen" />;
-  if (!s.profile) return <Onboarding onDone={(profile) => setS((p) => ({ ...p, profile }))} />;
 
   const st = s.stats;
   return (
@@ -79,12 +94,12 @@ export function Game() {
           <h1 className="font-display text-2xl font-extrabold text-primary">unilaglife<span className="text-foreground">.app</span></h1>
           <span className="font-mono text-xs text-muted-foreground">Day {s.day} · {String(s.hour).padStart(2, "0")}:00 · {here.name}</span>
         </div>
-        <Radio />
+        <div className="flex items-center gap-2"><Radio /><button onClick={() => supabase.auth.signOut()} className="rounded-full border border-border px-3 py-1.5 text-xs hover:bg-muted">Sign out</button></div>
       </header>
 
       <div className="grid gap-4 p-4 lg:grid-cols-[1fr_400px]">
         <div className="space-y-4">
-          <StatBar st={st} profile={s.profile} />
+          <StatBar st={st} profile={me} />
           <CampusMap current={s.loc} onPick={(l) => l.id !== s.loc && setTravelTo(l)} />
           <div className="rounded-lg border border-border bg-card p-3">
             <h3 className="mb-2 font-mono text-xs uppercase text-muted-foreground">Campus log</h3>
@@ -93,16 +108,17 @@ export function Game() {
         </div>
 
         <aside className="rounded-lg border border-border bg-card">
-          <nav className="grid grid-cols-4 border-b border-border text-xs">
-            {([["place", "Here"], ["room", "My Room"], ["board", "Noticeboard"], ["politics", "Elections"]] as const).map(([k, l]) => (
+          <nav className="grid grid-cols-5 border-b border-border text-xs">
+            {([["place", "Here"], ["inbox", `Inbox${inbox.unread ? ` (${inbox.unread})` : ""}`], ["room", "My Room"], ["board", "Board"], ["politics", "Elections"]] as const).map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)} className={`px-2 py-3 font-semibold ${tab === k ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>{l}</button>
             ))}
           </nav>
           <div className="p-4">
-            {tab === "place" && <Place loc={here} s={s} act={act} setS={setS} startCbt={() => setCbt(true)} />}
-            {tab === "room" && <MyRoom s={s} setS={setS} act={act} />}
-            {tab === "board" && <Board posts={s.posts} author={s.profile.name} add={(p) => setS((x) => ({ ...x, posts: [p, ...x.posts] }))} />}
-            {tab === "politics" && <Politics votes={s.votes} vote={(office, id) => { setS((x) => ({ ...x, votes: { ...x.votes, [office]: id } })); act(`Voted in the ${office} election`, { sanity: 3 }, 0); }} />}
+            {tab === "place" && <Place loc={here} s={s} me={me} act={act} setS={setS} startCbt={() => setCbt(true)} />}
+            {tab === "inbox" && <Inbox me={me} inbox={inbox} act={act} />}
+            {tab === "room" && <MyRoom s={s} me={me} setS={setS} act={act} />}
+            {tab === "board" && <Board me={me} />}
+            {tab === "politics" && <Politics me={me} onVote={(office) => act(`Voted in the ${office} election`, { sanity: 3 }, 0)} />}
           </div>
         </aside>
       </div>
@@ -189,10 +205,10 @@ const Btn = ({ children, onClick }: { children: React.ReactNode; onClick: () => 
   <button onClick={onClick} className="w-full rounded-md border border-border px-3 py-2 text-left text-sm hover:border-primary hover:bg-muted">{children}</button>
 );
 
-function Place({ loc, s, act, setS, startCbt }: { loc: Loc; s: Save; act: ActFn; setS: React.Dispatch<React.SetStateAction<Save>>; startCbt: () => void }) {
+function Place({ loc, s, me, act, setS, startCbt }: { loc: Loc; s: Save; me: Profile; act: ActFn; setS: React.Dispatch<React.SetStateAction<Save>>; startCbt: () => void }) {
   const [hall, setHall] = useState<string | null>(null);
   const pay = (n: number, msg: string, fx: Partial<Stats>, h = 1) => (s.stats.money < n ? alert("Your wallet is dry.") : act(msg, { ...fx, money: -n }, h));
-  const hallName = loc.type === "hostel" ? loc.name.replace(" Hall", "") : null;
+  const hallName = loc.type === "hostel" ? loc.name : loc.id === "akoka" ? "Off-Campus (Akoka)" : loc.id === "abuleoja" ? "Off-Campus (Abule-Oja)" : null;
   return (
     <div className="space-y-3">
       <div>
@@ -231,39 +247,148 @@ function Place({ loc, s, act, setS, startCbt }: { loc: Loc; s: Save; act: ActFn;
         </>}
         {loc.type === "road" && <Btn onClick={() => act("People-watched on University Road", { sanity: 4 }, 1)}>Hang out by the shuttle park</Btn>}
         {hallName && <>
-          <Btn onClick={() => act(`Slept at ${loc.name}`, { energy: 60, sanity: 5 }, 8)}>Sleep 8 hours</Btn>
-          <Btn onClick={() => setHall(hall ? null : hallName)}>{hall ? "Hide rooms" : "Explore rooms & students"}</Btn>
+          {loc.type === "hostel" && <Btn onClick={() => act(`Slept at ${loc.name}`, { energy: 60, sanity: 5 }, 8)}>Sleep 8 hours</Btn>}
+          <Btn onClick={() => setHall(hall ? null : hallName)}>{hall ? "Hide residents" : "Explore rooms & students"}</Btn>
         </>}
       </div>
-      {hall && <HallRooms hall={hall} act={act} invite={(n) => setS((p) => ({ ...p, roommates: [...new Set([...p.roommates, n])] }))} />}
+      {hall && <HallRooms hall={hall} me={me} act={act} />}
     </div>
   );
 }
 
-function HallRooms({ hall, act, invite }: { hall: string; act: ActFn; invite: (n: string) => void }) {
-  const rooms = useMemo(() => roomsFor(hall), [hall]);
-  const [note, setNote] = useState<{ to: string; text: string } | null>(null);
+async function send(from: string, to: string, kind: "knock" | "note" | "invite" | "game", body = "") {
+  const { error } = await supabase.from("messages").insert({ from_id: from, to_id: to, kind, body });
+  if (error) alert(error.message);
+}
+
+function HallRooms({ hall, me, act }: { hall: string; me: Profile; act: ActFn }) {
+  const [people, setPeople] = useState<Profile[] | null>(null);
+  const [note, setNote] = useState<{ to: Profile; text: string } | null>(null);
+  const [game, setGame] = useState<Profile | null>(null);
+  useEffect(() => {
+    supabase.from("profiles").select("*").eq("residence", hall).order("room").then(({ data }) => setPeople(data ?? []));
+  }, [hall]);
+  const rooms = useMemo(() => {
+    const m = new Map<string, Profile[]>();
+    (people ?? []).forEach((p) => { const k = p.room || "Off-campus lodge"; m.set(k, [...(m.get(k) ?? []), p]); });
+    return [...m.entries()];
+  }, [people]);
+  const online = (p: Profile) => p.is_seed ? (p.name.length % 3 !== 0) : Date.now() - new Date(p.last_seen).getTime() < 10 * 60_000;
+  if (!people) return <p className="text-sm text-muted-foreground">Loading residents…</p>;
+  if (!people.length) return <p className="text-sm text-muted-foreground">No one has registered here yet. Invite your hallmates!</p>;
   return (
     <div className="space-y-2">
-      {rooms.map((r) => (
-        <div key={r.room} className="rounded-md border border-border p-2">
-          <div className="mb-1 flex justify-between font-mono text-xs"><b>Room {r.room}</b><span className="text-muted-foreground">{r.occupants.length}/4</span></div>
-          {r.occupants.map((o) => (
-            <div key={o.name} className="flex items-center justify-between gap-2 py-1 text-sm">
-              <span><span className={o.home ? "text-accent" : "text-muted-foreground"}>●</span> {o.name} <span className="text-xs text-muted-foreground">{o.level} {o.faculty}</span></span>
-              <span className="flex gap-1 text-xs">
-                <button className="rounded bg-muted px-2 py-1" onClick={() => act(o.home ? `Knocked — ${o.name} let you in for gist` : `Knocked on ${r.room}, nobody home`, { sanity: o.home ? 6 : 0 }, 1)}>Knock</button>
-                <button className="rounded bg-muted px-2 py-1" onClick={() => setNote({ to: o.name, text: "" })}>Note</button>
-                <button className="rounded bg-muted px-2 py-1" onClick={() => { invite(o.name); act(`Invited ${o.name} to squat with you`, { sanity: 2 }, 0); }}>Squat</button>
-              </span>
-            </div>
-          ))}
+      {rooms.map(([room, occ]) => (
+        <div key={room} className="rounded-md border border-border p-2">
+          <div className="mb-1 flex justify-between font-mono text-xs"><b>{room.startsWith("Off") ? room : `Room ${room}`}</b><span className="text-muted-foreground">{occ.length} resident{occ.length > 1 ? "s" : ""}</span></div>
+          {occ.map((o) => {
+            const isMe = o.id === me.id; const home = online(o);
+            return (
+              <div key={o.id} className="py-1 text-sm">
+                <div><span className={home ? "text-accent" : "text-muted-foreground"}>●</span> {o.name}{isMe && " (you)"} <span className="text-xs text-muted-foreground">{o.level} {o.dept}</span></div>
+                {o.bio && <div className="pl-4 text-xs italic text-muted-foreground">"{o.bio}"</div>}
+                {!isMe && <div className="mt-1 flex flex-wrap gap-1 pl-4 text-xs">
+                  <button className="rounded bg-muted px-2 py-1 hover:bg-secondary" onClick={async () => { await send(me.id, o.id, "knock"); act(home ? `Knocked — ${o.name} let you in for gist` : `Knocked on ${o.name}'s door, left a knock`, { sanity: home ? 6 : 1 }, 1); }}>✊ Knock</button>
+                  <button className="rounded bg-muted px-2 py-1 hover:bg-secondary" onClick={() => setNote({ to: o, text: "" })}>✉️ Note</button>
+                  <button className="rounded bg-muted px-2 py-1 hover:bg-secondary" onClick={async () => { await send(me.id, o.id, "invite", "Come squat with me!"); act(`Invited ${o.name} to squat`, { sanity: 2 }, 0); }}>🛏️ Squat invite</button>
+                  <button className="rounded bg-primary px-2 py-1 text-primary-foreground" onClick={() => setGame(o)}>🎲 Play trivia</button>
+                </div>}
+              </div>
+            );
+          })}
         </div>
       ))}
       {note && (
-        <Modal title={`Note to ${note.to}`} onClose={() => setNote(null)}>
-          <textarea className="h-24 w-full rounded-md border border-input bg-background p-2 text-sm" value={note.text} onChange={(e) => setNote({ ...note, text: e.target.value })} placeholder="Slide it under the door…" />
-          <button className="mt-2 rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground" onClick={() => { act(`Slid a note to ${note.to}: "${note.text.slice(0, 40)}"`, { sanity: 2 }, 0); setNote(null); }}>Send note</button>
+        <Modal title={`Note to ${note.to.name}`} onClose={() => setNote(null)}>
+          <textarea maxLength={500} className="h-24 w-full rounded-md border border-input bg-background p-2 text-sm" value={note.text} onChange={(e) => setNote({ ...note, text: e.target.value })} placeholder="Slide it under the door…" />
+          <button className="mt-2 rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground" onClick={async () => { if (!note.text.trim()) return; await send(me.id, note.to.id, "note", note.text.trim()); act(`Slid a note to ${note.to.name}`, { sanity: 2 }, 0); setNote(null); }}>Send note</button>
+        </Modal>
+      )}
+      {game && <Trivia host={game} me={me} onDone={(score) => { act(`Played UNILAG trivia with ${game.name}: ${score}/5`, { sanity: 8 + score, energy: -5 }, 1); setGame(null); }} />}
+    </div>
+  );
+}
+
+function Trivia({ host, me, onDone }: { host: Profile; me: Profile; onDone: (score: number) => void }) {
+  const qs = useMemo(() => [...CBT_QUESTIONS].sort(() => Math.random() - 0.5).slice(0, 5), []);
+  const [i, setI] = useState(0); const [score, setScore] = useState(0);
+  const [board, setBoard] = useState<{ name: string; score: number }[]>([]);
+  const finished = i >= qs.length;
+  useEffect(() => {
+    if (!finished) return;
+    (async () => {
+      await supabase.from("trivia_scores").insert({ player_id: me.id, host_id: host.id, score });
+      await send(me.id, host.id, "game", `Scored ${score}/5 at UNILAG trivia in your room!`);
+      const { data } = await supabase.from("trivia_scores").select("score, profiles!trivia_scores_player_id_fkey(name)").order("score", { ascending: false }).order("created_at", { ascending: false }).limit(5);
+      setBoard((data ?? []).map((r) => ({ name: (r.profiles as { name: string } | null)?.name ?? "?", score: r.score })));
+    })();
+  }, [finished]); // eslint-disable-line
+  return (
+    <Modal title={`Trivia in ${host.name.split(" ")[0]}'s room`} onClose={() => onDone(score)}>
+      {!finished ? <>
+        <div className="mb-2 font-mono text-xs text-muted-foreground">Question {i + 1}/5 · Score {score}</div>
+        <p className="mb-3 font-semibold">{qs[i]!.q}</p>
+        <div className="grid grid-cols-2 gap-2">
+          {qs[i]!.a.map((a, k) => <button key={a} onClick={() => { if (k === qs[i]!.c) setScore((x) => x + 1); setI((x) => x + 1); }} className="rounded-md border border-border p-3 hover:border-primary">{a}</button>)}
+        </div>
+      </> : <>
+        <p className="mb-3 text-lg">You scored <b className="text-primary">{score}/5</b>!</p>
+        <div className="font-mono text-xs uppercase text-muted-foreground">Campus leaderboard</div>
+        {board.map((b, k) => <div key={k} className="flex justify-between text-sm"><span>{k + 1}. {b.name}</span><b>{b.score}</b></div>)}
+        <button className="mt-4 rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground" onClick={() => onDone(score)}>Done</button>
+      </>}
+    </Modal>
+  );
+}
+
+function useInbox(myId: string) {
+  const [msgs, setMsgs] = useState<(Msg & { from?: { name: string } | null; to?: { name: string } | null })[]>([]);
+  const load = useCallback(async () => {
+    const { data } = await supabase.from("messages")
+      .select("*, from:profiles!messages_from_id_fkey(name), to:profiles!messages_to_id_fkey(name)")
+      .order("created_at", { ascending: false }).limit(50);
+    setMsgs((data as never) ?? []);
+  }, []);
+  useEffect(() => {
+    load();
+    supabase.from("profiles").update({ last_seen: new Date().toISOString() }).eq("id", myId).then(() => {});
+    const ch = supabase.channel(`inbox-${myId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => load())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [myId, load]);
+  const unread = msgs.filter((m) => m.to_id === myId && !m.read).length;
+  return { msgs, unread, load };
+}
+
+const KIND: Record<string, string> = { knock: "✊ knocked on your door", note: "✉️ slid a note", invite: "🛏️ invited you to squat", game: "🎲 played trivia" };
+function Inbox({ me, inbox, act }: { me: Profile; inbox: ReturnType<typeof useInbox>; act: ActFn }) {
+  const [reply, setReply] = useState<{ id: string; name: string; text: string } | null>(null);
+  useEffect(() => {
+    const ids = inbox.msgs.filter((m) => m.to_id === me.id && !m.read).map((m) => m.id);
+    if (ids.length) supabase.from("messages").update({ read: true }).in("id", ids).then(() => inbox.load());
+  }, [inbox.msgs.length]); // eslint-disable-line
+  return (
+    <div className="space-y-2">
+      <h2 className="font-display text-xl font-bold">📬 Knocks & Notes</h2>
+      {!inbox.msgs.length && <p className="text-sm text-muted-foreground">Nothing yet. Visit a hostel and knock on some doors!</p>}
+      {inbox.msgs.map((m) => {
+        const incoming = m.to_id === me.id;
+        return (
+          <div key={m.id} className={`rounded-md border p-2 text-sm ${incoming && !m.read ? "border-primary" : "border-border"}`}>
+            <div>{incoming ? <b>{m.from?.name}</b> : <>You → <b>{m.to?.name}</b></>} <span className="text-muted-foreground">{incoming ? KIND[m.kind] : `(${m.kind})`}</span></div>
+            {m.body && <p className="mt-1">{m.body}</p>}
+            <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
+              <span>{new Date(m.created_at).toLocaleString()}</span>
+              {incoming && <button className="text-primary" onClick={() => setReply({ id: m.from_id, name: m.from?.name ?? "", text: "" })}>Reply</button>}
+            </div>
+          </div>
+        );
+      })}
+      {reply && (
+        <Modal title={`Reply to ${reply.name}`} onClose={() => setReply(null)}>
+          <textarea maxLength={500} className="h-24 w-full rounded-md border border-input bg-background p-2 text-sm" value={reply.text} onChange={(e) => setReply({ ...reply, text: e.target.value })} />
+          <button className="mt-2 rounded-md bg-primary px-4 py-2 font-semibold text-primary-foreground" onClick={async () => { if (!reply.text.trim()) return; await send(me.id, reply.id, "note", reply.text.trim()); act(`Replied to ${reply.name}`, {}, 0); setReply(null); }}>Send</button>
         </Modal>
       )}
     </div>
@@ -271,10 +396,10 @@ function HallRooms({ hall, act, invite }: { hall: string; act: ActFn; invite: (n
 }
 
 const DECOR = ["🛏️ Fresh bedsheet", "💡 Rechargeable lamp", "🪞 Mirror", "🖼️ Afrobeats poster", "🧺 Bucket & kettle", "🔌 Extension box", "🪴 Small plant", "📦 Provisions box"];
-function MyRoom({ s, setS, act }: { s: Save; setS: React.Dispatch<React.SetStateAction<Save>>; act: ActFn }) {
+function MyRoom({ s, me, setS, act }: { s: Save; me: Profile; setS: React.Dispatch<React.SetStateAction<Save>>; act: ActFn }) {
   return (
     <div className="space-y-3">
-      <h2 className="font-display text-xl font-bold">{s.profile!.residence} · {s.profile!.room || "Off-campus"}</h2>
+      <h2 className="font-display text-xl font-bold">{me.residence}{me.room && ` · ${me.room}`}</h2>
       <div className="rounded-md border border-dashed border-primary p-3">
         <div className="mb-2 font-mono text-xs text-muted-foreground">Your bunk space</div>
         <div className="flex min-h-12 flex-wrap gap-2 text-sm">{s.roomDecor.length ? s.roomDecor.map((d) => <span key={d} className="rounded bg-muted px-2 py-1">{d}</span>) : "Empty bunk. Make it home."}</div>
@@ -286,48 +411,78 @@ function MyRoom({ s, setS, act }: { s: Save; setS: React.Dispatch<React.SetState
       </div>
       <div>
         <div className="font-mono text-xs uppercase text-muted-foreground">Squatters / roommates</div>
-        {s.roommates.length ? s.roommates.map((r) => <div key={r} className="text-sm">• {r}</div>) : <p className="text-sm text-muted-foreground">Invite people from the hostel rooms list.</p>}
+        <p className="text-sm text-muted-foreground">Send squat invites from the hostel rooms list — replies land in your Inbox.</p>
       </div>
     </div>
   );
 }
 
-function Board({ posts, author, add }: { posts: Post[]; author: string; add: (p: Post) => void }) {
+function Board({ me }: { me: Profile }) {
   const [t, setT] = useState(""); const [b, setB] = useState("");
+  const [posts, setPosts] = useState<{ id: string; title: string; body: string; author_id: string; profiles: { name: string } | null }[]>([]);
+  const load = useCallback(async () => {
+    const { data } = await supabase.from("posts").select("id, title, body, author_id, profiles(name)").order("created_at", { ascending: false }).limit(50);
+    setPosts((data as never) ?? []);
+  }, []);
+  useEffect(() => {
+    load();
+    const ch = supabase.channel("posts").on("postgres_changes", { event: "*", schema: "public", table: "posts" }, () => load()).subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [load]);
   return (
     <div className="space-y-3">
       <h2 className="font-display text-xl font-bold">📌 Campus Noticeboard</h2>
       <div className="space-y-2 rounded-md bg-muted p-2">
-        <input className="w-full rounded border border-input bg-background p-2 text-sm" placeholder="Gig / business title" value={t} onChange={(e) => setT(e.target.value)} />
-        <textarea className="w-full rounded border border-input bg-background p-2 text-sm" placeholder="Details, location, price…" value={b} onChange={(e) => setB(e.target.value)} />
-        <button className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground" onClick={() => { if (!t) return; add({ id: Date.now(), author, title: t, body: b }); setT(""); setB(""); }}>Pin it</button>
+        <input maxLength={120} className="w-full rounded border border-input bg-background p-2 text-sm" placeholder="Gig / business title" value={t} onChange={(e) => setT(e.target.value)} />
+        <textarea maxLength={1000} className="w-full rounded border border-input bg-background p-2 text-sm" placeholder="Details, location, price…" value={b} onChange={(e) => setB(e.target.value)} />
+        <button className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground" onClick={async () => { if (!t.trim()) return; const { error } = await supabase.from("posts").insert({ author_id: me.id, title: t.trim(), body: b.trim() }); if (error) return alert(error.message); setT(""); setB(""); }}>Pin it</button>
       </div>
       {posts.map((p) => (
         <div key={p.id} className="rotate-[-0.5deg] rounded-md border-l-4 border-primary bg-secondary p-3 even:rotate-[0.5deg]">
-          <div className="font-semibold">{p.title}</div><p className="text-sm">{p.body}</p><div className="mt-1 font-mono text-[10px] text-muted-foreground">— {p.author}</div>
+          <div className="font-semibold">{p.title}</div><p className="text-sm">{p.body}</p>
+          <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground"><span>— {p.profiles?.name}</span>
+            {p.author_id === me.id && <button className="text-destructive" onClick={() => supabase.from("posts").delete().eq("id", p.id)}>Remove</button>}</div>
         </div>
       ))}
     </div>
   );
 }
 
-function Politics({ votes, vote }: { votes: Record<string, string>; vote: (o: string, id: string) => void }) {
+function Politics({ me, onVote }: { me: Profile; onVote: (office: string) => void }) {
   const offices = [...new Set(CANDIDATES.map((c) => c.office))];
+  const [votes, setVotes] = useState<{ voter_id: string; office: string; candidate_id: string }[]>([]);
+  const load = useCallback(async () => {
+    const { data } = await supabase.from("votes").select("voter_id, office, candidate_id");
+    setVotes(data ?? []);
+  }, []);
+  useEffect(() => {
+    load();
+    const ch = supabase.channel("votes").on("postgres_changes", { event: "*", schema: "public", table: "votes" }, () => load()).subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [load]);
+  const mine = (o: string) => votes.find((v) => v.voter_id === me.id && v.office === o)?.candidate_id;
   return (
     <div className="space-y-4">
       <h2 className="font-display text-xl font-bold">🗳️ SUG & Hall Elections</h2>
-      {offices.map((o) => (
-        <div key={o} className="space-y-2">
-          <div className="font-mono text-xs uppercase text-muted-foreground">{o}</div>
-          {CANDIDATES.filter((c) => c.office === o).map((c) => (
-            <div key={c.id} className={`rounded-md border p-3 ${votes[o] === c.id ? "border-primary" : "border-border"}`}>
-              <div className="font-semibold">{c.name}</div>
-              <p className="text-sm text-muted-foreground">{c.manifesto}</p>
-              <button disabled={!!votes[o]} onClick={() => vote(o, c.id)} className="mt-2 rounded bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground disabled:opacity-40">{votes[o] === c.id ? "Your vote ✓" : "Vote"}</button>
-            </div>
-          ))}
-        </div>
-      ))}
+      {offices.map((o) => {
+        const total = votes.filter((v) => v.office === o).length || 1;
+        return (
+          <div key={o} className="space-y-2">
+            <div className="font-mono text-xs uppercase text-muted-foreground">{o} · {votes.filter((v) => v.office === o).length} votes</div>
+            {CANDIDATES.filter((c) => c.office === o).map((c) => {
+              const n = votes.filter((v) => v.candidate_id === c.id).length; const pct = Math.round((n / total) * 100);
+              return (
+                <div key={c.id} className={`rounded-md border p-3 ${mine(o) === c.id ? "border-primary" : "border-border"}`}>
+                  <div className="flex justify-between"><span className="font-semibold">{c.name}</span><span className="font-mono text-xs">{n} · {pct}%</span></div>
+                  <div className="my-1 h-1.5 rounded bg-muted"><div className="h-1.5 rounded bg-primary" style={{ width: `${pct}%` }} /></div>
+                  <p className="text-sm text-muted-foreground">{c.manifesto}</p>
+                  <button disabled={!!mine(o)} onClick={async () => { const { error } = await supabase.from("votes").insert({ voter_id: me.id, office: o, candidate_id: c.id }); if (error) return alert(error.message); onVote(o); }} className="mt-2 rounded bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground disabled:opacity-40">{mine(o) === c.id ? "Your vote ✓" : "Vote"}</button>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -373,37 +528,66 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
   );
 }
 
-function Onboarding({ onDone }: { onDone: (p: Profile) => void }) {
-  const [p, setP] = useState<Profile>({ name: "", email: "", matric: "", faculty: "Science", dept: "", level: "100L", residence: "Jaja Hall", room: "" });
-  const [step, setStep] = useState(0); const [code, setCode] = useState(""); const [sent, setSent] = useState("");
-  const f = (k: keyof Profile) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setP({ ...p, [k]: e.target.value });
+function AuthScreen() {
+  const [mode, setMode] = useState<"in" | "up">("in");
+  const [email, setEmail] = useState(""); const [pw, setPw] = useState(""); const [msg, setMsg] = useState("");
   const inp = "w-full rounded-md border border-input bg-background p-2.5 text-sm";
-  const validEmail = /@(live\.)?unilag\.edu\.ng$/i.test(p.email) && /^\d{9}$/.test(p.matric);
+  async function submit() {
+    setMsg("");
+    const { error, data } = mode === "in"
+      ? await supabase.auth.signInWithPassword({ email, password: pw })
+      : await supabase.auth.signUp({ email, password: pw, options: { emailRedirectTo: window.location.origin } });
+    if (error) return setMsg(error.message);
+    if (mode === "up" && !data.session) setMsg("Check your email to confirm your account, then sign in.");
+  }
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="w-full max-w-md">
+        <h1 className="font-display text-5xl font-extrabold text-primary">unilaglife<span className="text-foreground">.app</span></h1>
+        <p className="mb-6 mt-2 text-muted-foreground">Live the Akoka experience with real students — hostels, New Hall, SUG wahala, trivia and TDB nights.</p>
+        <div className="space-y-3 rounded-lg border border-border bg-card p-5">
+          <button onClick={() => lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin })} className="w-full rounded-md border border-border py-2.5 font-semibold hover:bg-muted">Continue with Google</button>
+          <div className="text-center font-mono text-xs text-muted-foreground">or</div>
+          <input className={inp} type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input className={inp} type="password" placeholder="Password (min 6)" value={pw} onChange={(e) => setPw(e.target.value)} />
+          <button onClick={submit} className="w-full rounded-md bg-primary py-2.5 font-semibold text-primary-foreground">{mode === "in" ? "Sign in" : "Create account"}</button>
+          {msg && <p className="text-sm text-primary">{msg}</p>}
+          <button onClick={() => setMode(mode === "in" ? "up" : "in")} className="w-full text-sm text-muted-foreground underline">{mode === "in" ? "New student? Create an account" : "Have an account? Sign in"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Onboarding({ userId, email, onDone }: { userId: string; email: string; onDone: (p: Profile) => void }) {
+  const [p, setP] = useState({ name: "", matric: "", faculty: "Science", dept: "", level: "100L", residence: "Jaja Hall", room: "", bio: "" });
+  const [err, setErr] = useState("");
+  const f = (k: keyof typeof p) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setP({ ...p, [k]: e.target.value });
+  const inp = "w-full rounded-md border border-input bg-background p-2.5 text-sm";
+  const isStudentEmail = /@(live\.)?unilag\.edu\.ng$/i.test(email);
+  async function save() {
+    if (!/^\d{9}$/.test(p.matric)) return setErr("Matric number must be 9 digits.");
+    const { matric: _m, ...rest } = p;
+    const { data, error } = await supabase.from("profiles").insert({ ...rest, room: rest.residence.startsWith("Off") ? "" : rest.room, user_id: userId }).select().single();
+    if (error) return setErr(error.message);
+    onDone(data);
+  }
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-lg">
-        <h1 className="font-display text-5xl font-extrabold text-primary">unilaglife<span className="text-foreground">.app</span></h1>
-        <p className="mb-6 mt-2 text-muted-foreground">Live the Akoka experience — hostels, New Hall, SUG wahala, CBT and TDB nights.</p>
+        <h1 className="font-display text-4xl font-extrabold text-primary">Student registration</h1>
+        <p className="mb-4 mt-2 text-sm text-muted-foreground">{isStudentEmail ? "✓ UNILAG student email detected." : "Tip: sign up with your @live.unilag.edu.ng email to get a verified badge later."}</p>
         <div className="space-y-3 rounded-lg border border-border bg-card p-5">
-          {step === 0 && <>
-            <input className={inp} placeholder="Full name" value={p.name} onChange={f("name")} />
-            <input className={inp} placeholder="Student email (e.g. 190401001@live.unilag.edu.ng)" value={p.email} onChange={f("email")} />
-            <input className={inp} placeholder="Matric number (9 digits)" value={p.matric} onChange={f("matric")} />
-            <button disabled={!p.name || !validEmail} onClick={() => { setSent(String(Math.floor(100000 + Math.random() * 900000))); setStep(1); }} className="w-full rounded-md bg-primary py-2.5 font-semibold text-primary-foreground disabled:opacity-40">Verify student email</button>
-          </>}
-          {step === 1 && <>
-            <p className="text-sm">Demo verification code: <b className="font-mono text-primary">{sent}</b></p>
-            <input className={inp} placeholder="Enter 6-digit code" value={code} onChange={(e) => setCode(e.target.value)} />
-            <button disabled={code !== sent} onClick={() => setStep(2)} className="w-full rounded-md bg-primary py-2.5 font-semibold text-primary-foreground disabled:opacity-40">Confirm</button>
-          </>}
-          {step === 2 && <>
-            <select className={inp} value={p.faculty} onChange={f("faculty")}>{FACULTIES.map((x) => <option key={x}>{x}</option>)}</select>
-            <input className={inp} placeholder="Department" value={p.dept} onChange={f("dept")} />
-            <select className={inp} value={p.level} onChange={f("level")}>{LEVELS.map((x) => <option key={x}>{x}</option>)}</select>
-            <select className={inp} value={p.residence} onChange={f("residence")}>{[...HOSTELS.map((h) => `${h} Hall`), "Off-Campus (Akoka)", "Off-Campus (Abule-Oja)"].map((x) => <option key={x}>{x}</option>)}</select>
-            {!p.residence.startsWith("Off") && <input className={inp} placeholder="Room (e.g. B214)" value={p.room} onChange={f("room")} />}
-            <button disabled={!p.dept} onClick={() => onDone(p)} className="w-full rounded-md bg-primary py-2.5 font-semibold text-primary-foreground disabled:opacity-40">Enter campus</button>
-          </>}
+          <input className={inp} placeholder="Full name" value={p.name} onChange={f("name")} />
+          <input className={inp} placeholder="Matric number (9 digits, kept private)" value={p.matric} onChange={f("matric")} />
+          <select className={inp} value={p.faculty} onChange={f("faculty")}>{FACULTIES.map((x) => <option key={x}>{x}</option>)}</select>
+          <input className={inp} placeholder="Department" value={p.dept} onChange={f("dept")} />
+          <select className={inp} value={p.level} onChange={f("level")}>{LEVELS.map((x) => <option key={x}>{x}</option>)}</select>
+          <select className={inp} value={p.residence} onChange={f("residence")}>{[...HOSTELS.map((h) => `${h} Hall`), "Off-Campus (Akoka)", "Off-Campus (Abule-Oja)"].map((x) => <option key={x}>{x}</option>)}</select>
+          {!p.residence.startsWith("Off") && <input className={inp} placeholder="Room (e.g. B214)" value={p.room} onChange={f("room")} />}
+          <input className={inp} maxLength={140} placeholder="Short bio (what's your hustle?)" value={p.bio} onChange={f("bio")} />
+          {err && <p className="text-sm text-destructive">{err}</p>}
+          <button disabled={!p.name || !p.dept} onClick={save} className="w-full rounded-md bg-primary py-2.5 font-semibold text-primary-foreground disabled:opacity-40">Enter campus</button>
         </div>
       </div>
     </div>
