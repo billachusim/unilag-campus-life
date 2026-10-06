@@ -54,7 +54,7 @@ export function Game() {
       st.attendance = st.attendance + (fx.attendance ?? 0);
       return { ...p, stats: st, hour, day, log: [`D${day} ${String(hour).padStart(2, "0")}:00 — ${msg}`, ...p.log].slice(0, 40) };
     });
-    if (Math.random() < 0.12) setEvent(RANDOM_EVENTS[Math.floor(Math.random() * RANDOM_EVENTS.length)]);
+    if (Math.random() < 0.12) setEvent(RANDOM_EVENTS[Math.floor(Math.random() * RANDOM_EVENTS.length)]!);
   }
 
   function travel(mode: Transport) {
@@ -161,7 +161,7 @@ function StatBar({ st, profile }: { st: Stats; profile: Profile }) {
 const ICON: Record<string, string> = { gate: "🚧", admin: "🏛️", food: "🍲", library: "📚", faculty: "🎓", hostel: "🛏️", sports: "⚽", lagoon: "🌊", offcampus: "🏘️", business: "🏪", road: "🛺" };
 
 function CampusMap({ current, onPick }: { current: string; onPick: (l: Loc) => void }) {
-  const byId = useMemo(() => Object.fromEntries(LOCATIONS.map((l) => [l.id, l])), []);
+  const byId = useMemo(() => Object.fromEntries(LOCATIONS.map((l) => [l.id, l])) as Record<string, Loc>, []);
   return (
     <div className="overflow-hidden rounded-lg border border-border">
       <svg viewBox="0 0 1000 720" className="block w-full bg-map-land">
@@ -170,7 +170,7 @@ function CampusMap({ current, onPick }: { current: string; onPick: (l: Loc) => v
         <rect x="0" y="0" width="150" height="720" className="fill-muted/60" />
         <text x="20" y="30" className="fill-muted-foreground font-mono text-[12px]">OFF-CAMPUS</text>
         {ROAD_LINKS.map(([a, b], i) => (
-          <line key={i} x1={byId[a].x} y1={byId[a].y} x2={byId[b].x} y2={byId[b].y} className="stroke-map-road" strokeWidth={6} strokeLinecap="round" opacity={0.7} />
+          <line key={i} x1={byId[a]!.x} y1={byId[a]!.y} x2={byId[b]!.x} y2={byId[b]!.y} className="stroke-map-road" strokeWidth={6} strokeLinecap="round" opacity={0.7} />
         ))}
         {LOCATIONS.map((l) => (
           <g key={l.id} onClick={() => onPick(l)} className="cursor-pointer">
@@ -338,7 +338,7 @@ function Cbt({ onDone }: { onDone: (score: number) => void }) {
   useEffect(() => { const t = setInterval(() => setTime((x) => x - 1), 1000); return () => clearInterval(t); }, []);
   useEffect(() => { if (time <= 0 || i >= qs.length) onDone(score); }, [time, i]); // eslint-disable-line
   if (i >= qs.length) return null;
-  const q = qs[i];
+  const q = qs[i]!;
   return (
     <Modal title={`CBT Exam — Q${i + 1}/5`} onClose={() => onDone(score)}>
       <div className="mb-3 font-mono text-sm text-primary">⏱️ {time}s left</div>
