@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable/index";
 import type { Tables } from "@/integrations/supabase/types";
+import { Gate, PENDING_PROFILE_KEY } from "@/components/Gate";
 import {
   LOCATIONS, ROAD_LINKS, FACULTIES, LEVELS, HOSTELS, TRANSPORT, FOODS, CANDIDATES, CBT_QUESTIONS,
   RANDOM_EVENTS, dist, type Loc, type Transport,
@@ -26,17 +27,32 @@ export function Game() {
   const [session, setSession] = useState<{ user: { id: string; email?: string } } | null | undefined>(undefined);
   const [me, setMe] = useState<Profile | null | undefined>(undefined);
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (data.session && localStorage.getItem("unilag-remember") === "0" && !sessionStorage.getItem("unilag-tab")) {
+        await supabase.auth.signOut(); setSession(null); return;
+      }
+      sessionStorage.setItem("unilag-tab", "1");
+      setSession(data.session);
+    });
     const { data } = supabase.auth.onAuthStateChange((_e, sess) => setSession(sess));
     return () => data.subscription.unsubscribe();
   }, []);
   useEffect(() => {
     if (!session) { setMe(session === null ? null : undefined); return; }
-    supabase.from("profiles").select("*").eq("user_id", session.user.id).maybeSingle().then(({ data }) => setMe(data));
+    const uid = session.user.id;
+    supabase.from("profiles").select("*").eq("user_id", uid).maybeSingle().then(async ({ data }) => {
+      const pending = localStorage.getItem(PENDING_PROFILE_KEY);
+      if (!data && pending) {
+        const d = JSON.parse(pending);
+        const res = await supabase.from("profiles").insert({ ...d, user_id: uid }).select().single();
+        if (!res.error) { localStorage.removeItem(PENDING_PROFILE_KEY); setMe(res.data); return; }
+      }
+      setMe(data);
+    });
   }, [session]);
   if (session === undefined || (session && me === undefined)) return <div className="min-h-screen" />;
-  if (!session) return <AuthScreen />;
-  if (!me) return <Onboarding userId={session.user.id} email={session.user.email ?? ""} onDone={setMe} />;
+  if (!session) return <Gate />;
+  if (!me) return <Gate userId={session.user.id} onProfile={setMe} />;
   return <GameInner me={me} />;
 }
 
@@ -523,72 +539,6 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
       <div className="w-full max-w-md rounded-lg border border-border bg-card p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex justify-between"><h3 className="font-display text-lg font-bold">{title}</h3><button onClick={onClose}>✕</button></div>
         {children}
-      </div>
-    </div>
-  );
-}
-
-function AuthScreen() {
-  const [mode, setMode] = useState<"in" | "up">("in");
-  const [email, setEmail] = useState(""); const [pw, setPw] = useState(""); const [msg, setMsg] = useState("");
-  const inp = "w-full rounded-md border border-input bg-background p-2.5 text-sm";
-  async function submit() {
-    setMsg("");
-    const { error, data } = mode === "in"
-      ? await supabase.auth.signInWithPassword({ email, password: pw })
-      : await supabase.auth.signUp({ email, password: pw, options: { emailRedirectTo: window.location.origin } });
-    if (error) return setMsg(error.message);
-    if (mode === "up" && !data.session) setMsg("Check your email to confirm your account, then sign in.");
-  }
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md">
-        <h1 className="font-display text-5xl font-extrabold text-primary">unilaglife<span className="text-foreground">.app</span></h1>
-        <p className="mb-6 mt-2 text-muted-foreground">Live the Akoka experience with real students — hostels, New Hall, SUG wahala, trivia and TDB nights.</p>
-        <div className="space-y-3 rounded-lg border border-border bg-card p-5">
-          <button onClick={() => lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin })} className="w-full rounded-md border border-border py-2.5 font-semibold hover:bg-muted">Continue with Google</button>
-          <div className="text-center font-mono text-xs text-muted-foreground">or</div>
-          <input className={inp} type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className={inp} type="password" placeholder="Password (min 6)" value={pw} onChange={(e) => setPw(e.target.value)} />
-          <button onClick={submit} className="w-full rounded-md bg-primary py-2.5 font-semibold text-primary-foreground">{mode === "in" ? "Sign in" : "Create account"}</button>
-          {msg && <p className="text-sm text-primary">{msg}</p>}
-          <button onClick={() => setMode(mode === "in" ? "up" : "in")} className="w-full text-sm text-muted-foreground underline">{mode === "in" ? "New student? Create an account" : "Have an account? Sign in"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Onboarding({ userId, email, onDone }: { userId: string; email: string; onDone: (p: Profile) => void }) {
-  const [p, setP] = useState({ name: "", matric: "", faculty: "Science", dept: "", level: "100L", residence: "Jaja Hall", room: "", bio: "" });
-  const [err, setErr] = useState("");
-  const f = (k: keyof typeof p) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setP({ ...p, [k]: e.target.value });
-  const inp = "w-full rounded-md border border-input bg-background p-2.5 text-sm";
-  const isStudentEmail = /@(live\.)?unilag\.edu\.ng$/i.test(email);
-  async function save() {
-    if (!/^\d{9}$/.test(p.matric)) return setErr("Matric number must be 9 digits.");
-    const { matric: _m, ...rest } = p;
-    const { data, error } = await supabase.from("profiles").insert({ ...rest, room: rest.residence.startsWith("Off") ? "" : rest.room, user_id: userId }).select().single();
-    if (error) return setErr(error.message);
-    onDone(data);
-  }
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-lg">
-        <h1 className="font-display text-4xl font-extrabold text-primary">Student registration</h1>
-        <p className="mb-4 mt-2 text-sm text-muted-foreground">{isStudentEmail ? "✓ UNILAG student email detected." : "Tip: sign up with your @live.unilag.edu.ng email to get a verified badge later."}</p>
-        <div className="space-y-3 rounded-lg border border-border bg-card p-5">
-          <input className={inp} placeholder="Full name" value={p.name} onChange={f("name")} />
-          <input className={inp} placeholder="Matric number (9 digits, kept private)" value={p.matric} onChange={f("matric")} />
-          <select className={inp} value={p.faculty} onChange={f("faculty")}>{FACULTIES.map((x) => <option key={x}>{x}</option>)}</select>
-          <input className={inp} placeholder="Department" value={p.dept} onChange={f("dept")} />
-          <select className={inp} value={p.level} onChange={f("level")}>{LEVELS.map((x) => <option key={x}>{x}</option>)}</select>
-          <select className={inp} value={p.residence} onChange={f("residence")}>{[...HOSTELS.map((h) => `${h} Hall`), "Off-Campus (Akoka)", "Off-Campus (Abule-Oja)"].map((x) => <option key={x}>{x}</option>)}</select>
-          {!p.residence.startsWith("Off") && <input className={inp} placeholder="Room (e.g. B214)" value={p.room} onChange={f("room")} />}
-          <input className={inp} maxLength={140} placeholder="Short bio (what's your hustle?)" value={p.bio} onChange={f("bio")} />
-          {err && <p className="text-sm text-destructive">{err}</p>}
-          <button disabled={!p.name || !p.dept} onClick={save} className="w-full rounded-md bg-primary py-2.5 font-semibold text-primary-foreground disabled:opacity-40">Enter campus</button>
-        </div>
       </div>
     </div>
   );
