@@ -12,7 +12,7 @@ export interface Loc {
 
 export const LOCATIONS: Loc[] = [
   { id: "gate", name: "Main Gate", type: "gate", x: 90, y: 560, blurb: "Security checks, ID cards, and the first breath of Akoka." },
-  { id: "uniroad", name: "University Road", type: "road", x: 230, y: 470, blurb: "The spine of campus. Shuttles and keke everywhere." },
+  { id: "unirad", name: "University Road", type: "road", x: 230, y: 470, blurb: "The spine of campus. Shuttles and keke everywhere." },
   { id: "senate", name: "Senate Building", type: "admin", x: 420, y: 330, blurb: "Admin, SUG politics, and the iconic tower." },
   { id: "newhall", name: "New Hall", type: "food", x: 560, y: 470, blurb: "Korede Spag, Iya Moria amala, suya and plenty gist." },
   { id: "library", name: "Akintunde Ojo Library", type: "library", x: 520, y: 230, blurb: "Quiet floors, AC, and serious faces." },
@@ -35,20 +35,13 @@ export const LOCATIONS: Loc[] = [
   { id: "abuleoja", name: "Abule-Oja", type: "offcampus", x: 110, y: 660, blurb: "Bustling market, off-campus lodges." },
 ];
 
-export const ROADS: [string, string][] = [
-  ["gate", "uniroad"], ["unirad", "x"], ["unirad", "y"],
-].filter(() => false) as [string, string][];
-
 export const ROAD_LINKS: [string, string][] = [
   ["gate", "unirad"], ["unirad", "senate"], ["unirad", "biz"], ["unirad", "arts"], ["unirad", "akoka"], ["gate", "abuleoja"],
   ["senate", "library"], ["senate", "law"], ["senate", "arts"], ["law", "sports"], ["library", "science"], ["science", "engineering"],
   ["engineering", "lagoon"], ["senate", "tdb"], ["tdb", "newhall"], ["biz", "newhall"], ["newhall", "jaja"], ["jaja", "mariere"],
   ["mariere", "eninjoku"], ["jaja", "biobaku"], ["biz", "moremi"], ["moremi", "amina"], ["moremi", "kofo"], ["engineering", "mariere"],
   ["tdb", "engineering"],
-].map(([a, b]) => [a === "unirad" ? "unirad" : a, b === "unirad" ? "unirad" : b]) as [string, string][];
-
-// fix id alias
-LOCATIONS[1].id = "unirad";
+];
 
 export const FACULTIES = ["Science", "Engineering", "Law", "Arts", "Medilag (Medicine)", "Social Sciences", "Management Sciences", "Education", "Environmental Sciences"];
 export const LEVELS = ["100L", "200L", "300L", "400L", "500L"];
